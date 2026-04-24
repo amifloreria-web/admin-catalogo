@@ -6,8 +6,7 @@
 /* ══════════════════════════════════════════════════════════════
    1. CONFIGURACIÓN  — ajusta estas dos variables antes de subir
    ══════════════════════════════════════════════════════════════ */
-const WORKER_BASE_URL = 'https://dry-leaf-5fbf.ami-floreria-web.workers.dev'; // ← sin barra final
-const IMGBB_KEY       = '0626f552193a8df54c22779f21680cf8';              // ← clave de imgbb.com
+const WORKER_BASE_URL  = 'https://dry-leaf-5fbf.ami-floreria-web.workers.dev'; // ← sin barra final
 
 /* ── Presets de imagen — cambia ACTIVE_PRESET para ajustar la calidad de subida ── */
 const IMAGE_PRESETS = {
@@ -31,7 +30,6 @@ let activeProdFilter = '__all__'; // nombre de categoría o '__all__'
 let _pendingImgFile  = null;  // File | null — imagen nueva seleccionada
 let _currentImgUrl   = '';    // URL actual (edición sin cambio de img)
 let _imgWasRemoved   = false; // si el usuario quitó la imagen en edición
-let _oldImgDeleteUrl  = '';    // delete_url ImgBB de la imagen previa (se borra al guardar)
 
 /* ══════════════════════════════════════════════════════════════
    3. API HELPERS
@@ -82,7 +80,7 @@ async function apiDelete(path, body) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   4. IMGBB — RESIZE + UPLOAD + DELETE
+   4. IMAGEN — RESIZE + UPLOAD (vía Worker)
    ══════════════════════════════════════════════════════════════ */
 
 /* ── Redimensiona la imagen con Canvas antes de subir ───── */
@@ -114,16 +112,8 @@ async function resizeImage(file) {
   });
 }
 
-/* ── Elimina imagen de ImgBB (best-effort, sin bloquear UI) ── */
-async function deleteFromImgBB(deleteUrl) {
-  if (!deleteUrl) return;
-  try {
-    await fetch(deleteUrl, { mode: 'no-cors' });
-  } catch (_) { /* ignorar silenciosamente */ }
-}
-
-/* ── Sube a ImgBB — redimensiona primero, devuelve {url, deleteUrl} ── */
-async function uploadToImgBB(file) {
+/* ── Sube imagen vía Worker → ImgBB (álbum) ── */
+async function uploadImagen(file) {
   const processed = await resizeImage(file);
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -131,18 +121,15 @@ async function uploadToImgBB(file) {
     reader.onload  = async () => {
       try {
         const base64 = reader.result.split(',')[1];
-        const form   = new FormData();
-        form.append('key',   IMGBB_KEY);
-        form.append('image', base64);
-
-        const res = await fetch('https://api.imgbb.com/1/upload', {
-          method: 'POST',
-          body:   form,
+        const res = await fetch(`${WORKER_BASE_URL}/upload-imagen`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ imagen_base64: base64 }),
         });
-        if (!res.ok) throw new Error(`ImgBB → ${res.status}`);
+        if (!res.ok) throw new Error(`Worker upload → ${res.status}`);
         const data = await res.json();
-        if (!data.success) throw new Error(data.error?.message || 'Error ImgBB');
-        resolve({ url: data.data.url, deleteUrl: data.data.delete_url || '' });
+        if (data.error) throw new Error(data.error);
+        resolve({ url: data.url, publicId: data.public_id });
       } catch (e) {
         reject(e);
       }
@@ -550,12 +537,14 @@ function renderProdGrid() {
             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536M9 13l6.586-6.586a2 2 0 112.828 2.828L11.828 15.828a4 4 0 01-2.828 1.172H7v-2a4 4 0 011.172-2.828z"/>
             </svg>
+            Editar
           </button>
           <button class="admin-btn-icon danger" title="Eliminar"
                   data-action="delete-prod" data-id="${p.id}" data-nombre="${escapeAttr(p.nombre)}">
             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16"/>
             </svg>
+            Eliminar
           </button>
         </div>
       </div>
@@ -630,12 +619,10 @@ function openProdModal(id = null) {
     prodCatEl.value            = prod.categoria_id;
     prodDescEl.value           = prod.descripcion || '';
     _currentImgUrl             = prod.imagen_url;
-    _oldImgDeleteUrl           = prod.imagen_delete_url || '';
     setImagePreview(prod.imagen_url);
   } else {
     modalProdTitle.textContent = 'Nuevo producto';
     prodEditId.value           = '';
-    _oldImgDeleteUrl           = '';
   }
 
   openModal('modal-prod');
@@ -717,27 +704,26 @@ formProd.addEventListener('submit', async e => {
 
   try {
     let imagen_url        = _currentImgUrl;
-    let imagen_delete_url = '';
+    let imagen_public_id = '';
 
-    // Upload new image to ImgBB if a file was selected
+    // Subir nueva imagen vía Worker si se seleccionó un archivo
     if (_pendingImgFile) {
       imgUploadOvly.classList.remove('hidden');
       try {
-        const uploaded    = await uploadToImgBB(_pendingImgFile);
+        const uploaded    = await uploadImagen(_pendingImgFile);
         imagen_url        = uploaded.url;
-        imagen_delete_url = uploaded.deleteUrl;
-        // Elimina la imagen anterior de ImgBB (solo al guardar, best-effort)
-        if (_oldImgDeleteUrl) deleteFromImgBB(_oldImgDeleteUrl);
+        imagen_public_id = uploaded.publicId;
+        // El Worker elimina la imagen anterior automáticamente al hacer PUT
       } finally {
         imgUploadOvly.classList.add('hidden');
       }
     } else {
-      // Conservar el delete_url existente si la imagen no cambió
+      // Conservar el public_id existente si la imagen no cambió
       const existing    = products.find(p => p.id === +prodEditId.value);
-      imagen_delete_url = (!_imgWasRemoved && existing) ? (existing.imagen_delete_url || '') : '';
+      imagen_public_id = (!_imgWasRemoved && existing) ? (existing.imagen_public_id || '') : '';
     }
 
-    const payload = { nombre, descripcion: desc, imagen_url, imagen_delete_url, categoria_id: catId };
+    const payload = { nombre, descripcion: desc, imagen_url, imagen_public_id, categoria_id: catId };
 
     if (isEdit) {
       payload.id = +prodEditId.value;
