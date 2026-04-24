@@ -44,6 +44,57 @@
 <body class="font-body bg-[#FAF5F0] text-[#1A1A1A] min-h-screen flex flex-col">
 
   <!-- ============================================================
+       LOGIN OVERLAY
+  ============================================================ -->
+  <div id="login-overlay"
+       class="fixed inset-0 z-[9999] flex items-center justify-center bg-[#FAF5F0] px-4"
+       aria-label="Inicio de sesión">
+    <div class="w-full max-w-sm">
+
+      <!-- Branding -->
+      <div class="text-center mb-10">
+        <img src="assets/logo.png" alt="AMI Florería" class="h-14 w-auto object-contain mx-auto mb-4" />
+        <p class="font-body text-xs uppercase tracking-[0.25em] text-[#AAAAAA]">Panel de Administración</p>
+      </div>
+
+      <!-- Card -->
+      <div class="bg-white rounded-2xl border border-[#EDEDED] shadow-[0_8px_32px_rgba(0,0,0,0.10)] p-8">
+        <h2 class="font-display text-2xl font-medium text-[#1A1A1A] mb-6">Iniciar sesión</h2>
+        <form id="login-form" novalidate class="flex flex-col gap-4">
+
+          <div class="admin-field">
+            <label class="admin-label" for="login-user">Usuario</label>
+            <input id="login-user" type="text" class="admin-input"
+                   placeholder="Nombre de usuario"
+                   autocomplete="username" />
+          </div>
+
+          <div class="admin-field">
+            <label class="admin-label" for="login-pass">Contraseña</label>
+            <input id="login-pass" type="password" class="admin-input"
+                   placeholder="Contraseña"
+                   autocomplete="current-password" />
+          </div>
+
+          <!-- Error -->
+          <div id="login-error"
+               class="hidden text-sm font-medium text-red-700 bg-red-50 border border-red-200
+                      rounded-lg px-4 py-3 leading-snug">
+          </div>
+
+          <button type="submit" id="btn-login"
+                  class="admin-btn-primary w-full mt-1 justify-center">
+            <span id="btn-login-label">Entrar</span>
+            <span id="btn-login-spinner" class="hidden admin-spinner"></span>
+          </button>
+
+        </form>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ============================================================
        TOPBAR
   ============================================================ -->
   <header class="admin-topbar fixed top-0 left-0 right-0 z-40 h-16 flex items-center px-6 gap-4">
@@ -74,6 +125,17 @@
         Categorías
       </button>
     </nav>
+
+    <!-- Logout -->
+    <button id="btn-logout"
+            class="hidden items-center gap-1.5 font-body text-xs text-[#AAAAAA]
+                   hover:text-primary transition-colors duration-200 ml-3">
+      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round"
+              d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+      </svg>
+      Salir
+    </button>
   </header>
 
   <!-- ============================================================

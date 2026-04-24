@@ -31,11 +31,32 @@ let _pendingImgFile  = null;  // File | null — imagen nueva seleccionada
 let _currentImgUrl   = '';    // URL actual (edición sin cambio de img)
 let _imgWasRemoved   = false; // si el usuario quitó la imagen en edición
 
-/* ══════════════════════════════════════════════════════════════
-   3. API HELPERS
-   ══════════════════════════════════════════════════════════════ */
+/* ════════════════════════════════════════════════════════════
+   3. AUTENTICACIÓN
+   ════════════════════════════════════════════════════════════ */
+const SESSION_KEY = 'ami_admin_token';
+
+function getToken()   { return sessionStorage.getItem(SESSION_KEY) || ''; }
+function setToken(t)  { sessionStorage.setItem(SESSION_KEY, t); }
+function clearToken() { sessionStorage.removeItem(SESSION_KEY); }
+
+function handleUnauthorized() {
+  clearToken();
+  const overlay = document.getElementById('login-overlay');
+  if (overlay) {
+    overlay.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+  }
+}
+
+/* ════════════════════════════════════════════════════════════
+   4. API HELPERS
+   ════════════════════════════════════════════════════════════ */
 async function apiGet(path) {
-  const res = await fetch(`${WORKER_BASE_URL}${path}`);
+  const res = await fetch(`${WORKER_BASE_URL}${path}`, {
+    headers: { 'Authorization': `Bearer ${getToken()}` },
+  });
+  if (res.status === 401) { handleUnauthorized(); throw new Error('Sesión expirada. Inicia sesión nuevamente.'); }
   if (!res.ok) throw new Error(`GET ${path} → ${res.status}`);
   return res.json();
 }
@@ -43,9 +64,10 @@ async function apiGet(path) {
 async function apiPost(path, body) {
   const res = await fetch(`${WORKER_BASE_URL}${path}`, {
     method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
     body:    JSON.stringify(body),
   });
+  if (res.status === 401) { handleUnauthorized(); throw new Error('Sesión expirada. Inicia sesión nuevamente.'); }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `POST ${path} → ${res.status}`);
@@ -56,9 +78,10 @@ async function apiPost(path, body) {
 async function apiPut(path, body) {
   const res = await fetch(`${WORKER_BASE_URL}${path}`, {
     method:  'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
     body:    JSON.stringify(body),
   });
+  if (res.status === 401) { handleUnauthorized(); throw new Error('Sesión expirada. Inicia sesión nuevamente.'); }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `PUT ${path} → ${res.status}`);
@@ -69,9 +92,10 @@ async function apiPut(path, body) {
 async function apiDelete(path, body) {
   const res = await fetch(`${WORKER_BASE_URL}${path}`, {
     method:  'DELETE',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
     body:    JSON.stringify(body),
   });
+  if (res.status === 401) { handleUnauthorized(); throw new Error('Sesión expirada. Inicia sesión nuevamente.'); }
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `DELETE ${path} → ${res.status}`);
@@ -123,9 +147,10 @@ async function uploadImagen(file) {
         const base64 = reader.result.split(',')[1];
         const res = await fetch(`${WORKER_BASE_URL}/upload-imagen`, {
           method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getToken()}` },
           body:    JSON.stringify({ imagen_base64: base64 }),
         });
+        if (res.status === 401) throw new Error('Sesión expirada. Inicia sesión nuevamente.');
         if (!res.ok) throw new Error(`Worker upload → ${res.status}`);
         const data = await res.json();
         if (data.error) throw new Error(data.error);
@@ -785,7 +810,7 @@ function escapeAttr(str) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   9. BOOTSTRAP — carga inicial de datos
+   9. CARGA DE DATOS
    ══════════════════════════════════════════════════════════════ */
 async function loadData() {
   try {
@@ -819,4 +844,81 @@ async function loadData() {
   }
 }
 
-loadData();
+/* ════════════════════════════════════════════════════════════
+   10. ARRANQUE — verifica sesión antes de cargar datos
+   ════════════════════════════════════════════════════════════ */
+(function initAuth() {
+  const overlay    = document.getElementById('login-overlay');
+  const loginForm  = document.getElementById('login-form');
+  const loginError = document.getElementById('login-error');
+  const logoutBtn  = document.getElementById('btn-logout');
+
+  function showLoginError(msg) {
+    loginError.textContent = msg;
+    loginError.classList.remove('hidden');
+  }
+
+  function hideLoginError() {
+    loginError.classList.add('hidden');
+  }
+
+  function showApp() {
+    overlay.classList.add('hidden');
+    document.body.style.overflow = '';
+    if (logoutBtn) logoutBtn.classList.replace('hidden', 'flex');
+  }
+
+  // Login form submit
+  loginForm.addEventListener('submit', async e => {
+    e.preventDefault();
+    hideLoginError();
+
+    const usuario  = document.getElementById('login-user').value.trim();
+    const password = document.getElementById('login-pass').value;
+
+    if (!usuario || !password) {
+      showLoginError('Ingresa tu usuario y contraseña.');
+      return;
+    }
+
+    setBtnLoading('btn-login-label', 'btn-login-spinner', true);
+
+    try {
+      const res = await fetch(`${WORKER_BASE_URL}/auth/login`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ usuario, password }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        showLoginError(data.error || 'Usuario o contraseña incorrectos.');
+        return;
+      }
+
+      setToken(data.token);
+      showApp();
+      loadData();
+    } catch {
+      showLoginError('No se pudo conectar. Verifica tu conexión e intenta de nuevo.');
+    } finally {
+      setBtnLoading('btn-login-label', 'btn-login-spinner', false);
+    }
+  });
+
+  // Logout
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', () => {
+      clearToken();
+      location.reload();
+    });
+  }
+
+  // Ya hay sesión activa
+  if (getToken()) {
+    showApp();
+    loadData();
+  } else {
+    document.body.style.overflow = 'hidden';
+  }
+})();
